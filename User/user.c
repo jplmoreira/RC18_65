@@ -7,7 +7,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-#define MAX_BUFFER 128
+#define MAX_BUFFER 512
 #define STANDARD_PORT 58065
 #define USER "99999"
 #define PASS "zzzzzzzz"
@@ -19,7 +19,8 @@ int fd, interact = 1;
 int cs_port = 0;
 char cs_name[MAX_BUFFER], login_user[6], login_pass[9];
 
-char *read_n(int nbytes);
+void read_n(char *msg, int nbytes);
+void read_msg(char *msg);
 void read_args(int argc, char *argv[]);
 int get_argument_type(char *arg);
 int connect_cs();
@@ -82,16 +83,16 @@ int main(int argc, char *argv[]) {
   return 0;
 }
 
-char* read_n(int nbytes) {
+void read_n(char *msg, int nbytes) {
   int nr, nleft;
-  char *msg, *ptr;
+  char *ptr;
 
+  memset(msg, '\0', nbytes);
   nleft = nbytes;
-  msg = (char *) malloc(nbytes*sizeof(char));
-  memset(msg, '\0', sizeof(*msg));
   ptr = msg;
   while (nleft > 0) {
     nr = read(fd,ptr,nleft);
+    printf("Number: %d\n", nr);
     if (nr == -1) {
       printf("An error ocurred while reading\n");
       exit(-1);
@@ -103,25 +104,17 @@ char* read_n(int nbytes) {
     ptr += nr;
   }
   printf("Read: %s\n", msg);
-  return msg;
 }
 
-char* read_msg() {
-  char *buffer, *resp;
-  resp = (char *) malloc(MAX_BUFFER * sizeof(char));
-  memset(resp, '\0', sizeof(*resp));
+void read_msg(char *msg) {
+  char buffer[2];
   while (1) {
-    buffer = read_n(1);
-    strcat(resp, buffer);
+    read_n(buffer, 1);
     if (!strcmp(buffer, "\n")) {
-      memset(buffer, '\0', 1);
-      free(buffer);
       break;
     }
-    memset(buffer, '\0', 1);
-    free(buffer);
+    strcat(msg, buffer);
   }
-  return resp;
 }
 
 void read_args(int argc, char *argv[]) {
@@ -228,7 +221,7 @@ void perform_action(char *action, char *action_args) {
 }
 
 int login(char *user, char *pass) {
-  char login_msg[20], *msg;
+  char login_msg[20], msg[5], buffer[MAX_BUFFER];
   
   if (user[0] == '\0' || pass[0] == '\0') {
     return 0;
@@ -241,33 +234,30 @@ int login(char *user, char *pass) {
 
     write(fd, login_msg, 20);
 
-    msg = read_n(4);
+    read_n(msg,4);
     if (!strcmp(msg, "AUR ")) {
-      memset(msg, '\0', 4);
-      free(msg);
-      msg = read_msg();
-      if (!strcmp(msg, "OK\n")) {
+      memset(buffer, '\0', MAX_BUFFER);
+      read_msg(buffer);
+      if (!strcmp(buffer, "OK")) {
         if (login_user[0] == '\0' || login_pass[0] == '\0') {
           strcpy(login_user, user);
           strcpy(login_pass, pass);
         }
         return 1;
       }
-      else if (!strcmp(msg, "NOK\n")) {
+      else if (!strcmp(buffer, "NOK")) {
         return 0;
       }
-      else if (!strcmp(msg, "NEW\n")) {
+      else if (!strcmp(buffer, "NEW")) {
         strcpy(login_user, user);
         strcpy(login_pass, pass);
         return 1;
       } else {
-        printf("Unknown response arguments: %s\n", msg);
+        printf("Unknown response arguments: %s\n", buffer);
         return 0;
       }
     } else {
       printf("Non standard response: %s\n", msg);
-      memset(msg, '\0', 4);
-      free(msg);
       return 0;
     }
   }
@@ -280,7 +270,7 @@ void logout() {
 }
 
 void dirlist() {
-  char *msg;
+  char *msg, resp[4], number[4], buffer[1];
   
   printf("Reauthorizing user\n");
   
@@ -289,11 +279,42 @@ void dirlist() {
     return;
   }
 
-  printf("Listing directories\n");
-
-  msg = (char *) malloc(4 * sizeof(char));
+  if (!connect_cs()) {
+    printf("Failed to reconnect\n");
+    return;
+  }
+  
   msg = "LSD\n";
-  printf("%s", msg);
+  if (write(fd, msg, 5) <= 0) {
+    printf("Error writing\n");
+    return;
+  }
+  printf("Wrote: %s\n", msg);
+
+  read_n(resp,4);
+  printf("Response read: %s\n", resp);
+  if (!strcmp(resp, "LDR ")) {
+    memset(resp, '\0', 4);
+    
+    printf("Reading number\n");
+    while(1) {
+      read_n(buffer,1);
+      if (!strcmp(buffer, " ")) {
+        memset(buffer, '\0', 1);
+        free(buffer);
+        break;
+      }
+      strcat(number, buffer);
+      memset(buffer, '\0', 1);
+      free(buffer);
+    }
+    printf("%s\n", number);
+  } else {
+    printf("Non standard response: %s\n", resp);
+    memset(resp, '\0', 4);
+    free(resp);
+    return;
+  }
 }
 
 void leave() {
