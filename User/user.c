@@ -12,22 +12,29 @@
 #define USER "99999"
 #define PASS "zzzzzzzz"
 
+struct hostent *hostptr;
+struct sockaddr_in serveraddr;
+
 int fd, interact = 1;
 int cs_port = 0;
-char cs_name[MAX_BUFFER];
+char cs_name[MAX_BUFFER], login_user[6], login_pass[9];
 
 char *read_n(int nbytes);
 void read_args(int argc, char *argv[]);
 int get_argument_type(char *arg);
+int connect_cs();
+void disconnect_cs();
 void perform_action(char *action, char *action_args);
-void login(char *user, char *pass);
+int login(char *user, char *pass);
+void logout();
+void dirlist();
 void leave();
 
 int main(int argc, char *argv[]) {
-  struct hostent *hostptr;
-  struct sockaddr_in serveraddr;
 
   memset(cs_name, '\0', sizeof(cs_name));
+  memset(login_user, '\0', sizeof(login_user));
+  memset(login_pass, '\0', sizeof(login_pass));
 
   if (argc == 1) {
     printf("No arguments passed\n");
@@ -46,29 +53,17 @@ int main(int argc, char *argv[]) {
     }
   }
 
-  printf("Connecting to %s:%d\n", cs_name, cs_port);
-
-  fd = socket(AF_INET,SOCK_STREAM,0);
-  hostptr = gethostbyname(cs_name);
-
-  memset((void*) &serveraddr, (int) '\0', sizeof(serveraddr));
-  serveraddr.sin_family = AF_INET;
-  serveraddr.sin_addr.s_addr = ((struct in_addr *) (hostptr->h_addr_list[0]))->s_addr;
-  serveraddr.sin_port = htons((u_short) cs_port);
-
-  if (connect(fd, (struct sockaddr*) &serveraddr, sizeof(serveraddr)) == -1) {
-    printf("Failed to connect\n");
-    return 1;
-  }
-
-  printf("Connected to server\n");
-
   char command[MAX_BUFFER];
   char *action;
   char *action_args;
+  char *usr;
 
   while (interact) {
-    printf("Choose your action:\n > ");
+    if (login_user[0] == '\0')
+      usr = "Guest";
+    else
+      usr = login_user;
+    printf("%s:\n > ", usr);
     fflush(stdout);
 
     fgets(command, MAX_BUFFER, stdin);
@@ -93,6 +88,7 @@ char* read_n(int nbytes) {
 
   nleft = nbytes;
   msg = (char *) malloc(nbytes*sizeof(char));
+  memset(msg, '\0', sizeof(*msg));
   ptr = msg;
   while (nleft > 0) {
     nr = read(fd,ptr,nleft);
@@ -106,6 +102,7 @@ char* read_n(int nbytes) {
     nleft -= nr;
     ptr += nr;
   }
+  printf("Read: %s\n", msg);
   return msg;
 }
 
@@ -117,8 +114,12 @@ char* read_msg() {
     buffer = read_n(1);
     strcat(resp, buffer);
     if (!strcmp(buffer, "\n")) {
+      memset(buffer, '\0', 1);
+      free(buffer);
       break;
     }
+    memset(buffer, '\0', 1);
+    free(buffer);
   }
   return resp;
 }
@@ -166,6 +167,31 @@ int get_argument_type(char *arg) {
   }
 }
 
+int connect_cs() {
+
+  printf("Connecting to %s:%d\n", cs_name, cs_port);
+
+  fd = socket(AF_INET,SOCK_STREAM,0);
+  hostptr = gethostbyname(cs_name);
+
+  memset((void*) &serveraddr, (int) '\0', sizeof(serveraddr));
+  serveraddr.sin_family = AF_INET;
+  serveraddr.sin_addr.s_addr = ((struct in_addr *) (hostptr->h_addr_list[0]))->s_addr;
+  serveraddr.sin_port = htons((u_short) cs_port);
+
+  if (connect(fd, (struct sockaddr*) &serveraddr, sizeof(serveraddr)) == -1) {
+    printf("Failed to connect\n");
+    return 0;
+  }
+
+  printf("Connected to server\n");
+  return 1;
+}
+
+void disconnect_cs() {
+  close(fd);
+}
+
 void perform_action(char *action, char *action_args) {
   if (!strcmp(action, "login")) {
     char *user;
@@ -176,45 +202,100 @@ void perform_action(char *action, char *action_args) {
 
     if (strlen(user) != 5 || strlen(pass) != 8) {
       printf("Login arguments are incorrect\n");
-      exit(-1);
+      return;
     }
 
-    login(user, pass);
+    if (!connect_cs())
+      return;
+    
+    if (login(user, pass))
+      printf("Login successful\n");
+    else
+      printf("Failed to login\n");
+    disconnect_cs();
+  } else if (!strcmp(action, "logout")) {
+    logout();
   } else if (!strcmp(action, "exit")) {
     leave();
+  } else if (!strcmp(action, "dirlist")) {
+    if (!connect_cs())
+      return;
+    dirlist();
+    disconnect_cs();
+  } else
+    printf("Action not recognized\n");
+
+}
+
+int login(char *user, char *pass) {
+  char login_msg[20], *msg;
+  
+  if (user[0] == '\0' || pass[0] == '\0') {
+    return 0;
+  } else {
+    strcpy(login_msg, "AUT ");
+    strcat(login_msg, user);
+    strcat(login_msg, " ");
+    strcat(login_msg, pass);
+    strcat(login_msg, "\n");
+
+    write(fd, login_msg, 20);
+
+    msg = read_n(4);
+    if (!strcmp(msg, "AUR ")) {
+      memset(msg, '\0', 4);
+      free(msg);
+      msg = read_msg();
+      if (!strcmp(msg, "OK\n")) {
+        if (login_user[0] == '\0' || login_pass[0] == '\0') {
+          strcpy(login_user, user);
+          strcpy(login_pass, pass);
+        }
+        return 1;
+      }
+      else if (!strcmp(msg, "NOK\n")) {
+        return 0;
+      }
+      else if (!strcmp(msg, "NEW\n")) {
+        strcpy(login_user, user);
+        strcpy(login_pass, pass);
+        return 1;
+      } else {
+        printf("Unknown response arguments: %s\n", msg);
+        return 0;
+      }
+    } else {
+      printf("Non standard response: %s\n", msg);
+      memset(msg, '\0', 4);
+      free(msg);
+      return 0;
+    }
   }
 }
 
-void login(char *user, char *pass) {
-  char login_msg[20], *msg;
+void logout() {
+  memset(login_user, '\0', sizeof(login_user));
+  memset(login_pass, '\0', sizeof(login_pass));
+  printf("Logged out\n");
+}
+
+void dirlist() {
+  char *msg;
   
-  strcpy(login_msg, "AUT ");
-  strcat(login_msg, user);
-  strcat(login_msg, " ");
-  strcat(login_msg, pass);
-  strcat(login_msg, "\n");
-
-  write(fd, login_msg, 20);
-
-  msg = read_n(4);
-  if (!strcmp(msg, "AUR ")) {
-    free(msg);
-    msg = read_msg();
-    if (!strcmp(msg, "OK\n"))
-      printf("Login successful\n");
-    else if (!strcmp(msg, "NOK\n"))
-      printf("Login failed\n");
-    else if (!strcmp(msg, "NEW\n"))
-      printf("User created\n");
-    else
-      printf("Unknown response arguments\n");
-  } else {
-    printf("Non standard response: %s\n", msg);
+  printf("Reauthorizing user\n");
+  
+  if (!login(login_user, login_pass)){
+    printf("Login needed to list directories\n");
     return;
   }
+
+  printf("Listing directories\n");
+
+  msg = (char *) malloc(4 * sizeof(char));
+  msg = "LSD\n";
+  printf("%s", msg);
 }
 
 void leave() {
-  close(fd);
   interact = 0;
 }
