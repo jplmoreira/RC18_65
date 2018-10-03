@@ -99,7 +99,7 @@ void read_n(char *msg, int nbytes) {
       exit(-1);
     } else if (nr == 0) {
       printf("Connection was closed by peer\n");
-      break;
+      return;
     }
     nleft -= nr;
     ptr += nr;
@@ -222,6 +222,7 @@ void perform_action(char *action, char *action_args) {
 
 int login(char *user, char *pass) {
   char login_msg[20], msg[5], buffer[MAX_BUFFER];
+  memset(msg, '\0', sizeof(msg));
   
   if (user[0] == '\0' || pass[0] == '\0') {
     return 0;
@@ -232,7 +233,7 @@ int login(char *user, char *pass) {
     strcat(login_msg, pass);
     strcat(login_msg, "\n");
 
-    write(fd, login_msg, 20);
+    write(fd, login_msg, strlen(login_msg));
 
     read_n(msg,4);
     if (!strcmp(msg, "AUR ")) {
@@ -288,6 +289,7 @@ void dirlist() {
   }
 
   printf("1\n");
+  memset(resp, '\0', sizeof(resp));
   read_n(resp,4);
   printf("Response read: %s\n", resp);
   if (!strcmp(resp, "LDR ")) {
