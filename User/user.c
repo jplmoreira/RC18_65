@@ -20,7 +20,7 @@ int fd, interact = 1;
 int cs_port = 0;
 char cs_name[MAX_BUFFER], login_user[6], login_pass[9];
 
-void read_n(char *msg, int nbytes);
+int read_n(char *msg, int nbytes);
 void read_msg(char *msg, char *end);
 void read_args(int argc, char *argv[]);
 int get_argument_type(char *arg);
@@ -30,6 +30,7 @@ void perform_action(char *action, char *action_args);
 int login(char *user, char *pass);
 void logout();
 void dirlist();
+void filelist(char *dir);
 void leave();
 
 int main(int argc, char *argv[]) {
@@ -84,7 +85,7 @@ int main(int argc, char *argv[]) {
   return 0;
 }
 
-void read_n(char *msg, int nbytes) {
+int read_n(char *msg, int nbytes) {
   int nr, nleft;
   char *ptr;
 
@@ -97,18 +98,22 @@ void read_n(char *msg, int nbytes) {
       printf("An error ocurred while reading: %s\n", strerror(errno));
       exit(-1);
     } else if (nr == 0) {
-      printf("Connection was closed by peer\n");
-      return;
+      return 0;
     }
     nleft -= nr;
     ptr += nr;
   }
+  return 1;
 }
 
 void read_msg(char *msg, char *end) {
   char buffer[2];
   while (1) {
-    read_n(buffer, 1);
+    if (!read_n(buffer, 1)) {
+      printf("Connection closed by peer\n");
+      return;
+    }
+
     if (!strcmp(buffer, end)) {
       break;
     } else if (buffer[0] == '\0') {
@@ -216,6 +221,11 @@ void perform_action(char *action, char *action_args) {
       return;
     dirlist();
     disconnect_cs();
+  } else if (!strcmp(action, "filelist")) {
+    if (!connect_cs())
+      return;
+    filelist(action_args);
+    disconnect_cs();
   } else
     printf("Action not recognized\n");
 
@@ -236,7 +246,10 @@ int login(char *user, char *pass) {
 
     write(fd, login_msg, strlen(login_msg));
 
-    read_n(msg,4);
+    if (!read_n(msg,4)) {
+      printf("Connection closed by peer\n");
+      return 0;
+    }
     if (!strcmp(msg, "AUR ")) {
       memset(buffer, '\0', sizeof(buffer));
       read_msg(buffer, "\n");
@@ -288,7 +301,11 @@ void dirlist() {
   }
 
   memset(resp, '\0', sizeof(resp));
-  read_n(resp,4);
+  if (!read_n(resp,4)) {
+    printf("Connection closed by peer\n");
+    return;
+  }
+  
   if (!strcmp(resp, "LDR ")) {
     
     memset(dirs, '\0', sizeof(dirs));
@@ -299,14 +316,103 @@ void dirlist() {
     for (int i = 0; i < n-1; i++) {
       memset(buffer, '\0', sizeof(buffer));
       read_msg(buffer, " ");
-      strcat(dirs, "\n -");
+      strcat(dirs, "\n - ");
       strcat(dirs, buffer);
     }
     memset(buffer, '\0', sizeof(buffer));
     read_msg(buffer, "\n");
-    strcat(dirs, "\n -");
+    strcat(dirs, "\n - ");
     strcat(dirs, buffer);
     printf("%s\n", dirs);
+  } else {
+    printf("Non standard response: %s\n", resp);
+    memset(resp, '\0', sizeof(resp));
+    return;
+  }
+}
+
+void filelist(char *dir) {
+  char msg[26], resp[5], number[4];
+  char buffer[MAX_BUFFER], bs_ip[MAX_BUFFER], bs_port[MAX_BUFFER], files[MAX_BUFFER];
+  int n;
+  
+  if (!login(login_user, login_pass)){
+    printf("Login needed to list directories\n");
+    return;
+  }
+
+  memset(msg, '\0', sizeof(msg));
+  strcpy(msg, "LSF ");
+  strcat(msg, dir);
+  strcat(msg, "\n");
+  if (write(fd, msg, strlen(msg)) <= 0) {
+    printf("Error writing\n");
+    return;
+  }
+  
+  memset(resp, '\0', sizeof(resp));
+  if (!read_n(resp,4)) {
+    printf("Connection closed by peer\n");
+    return;
+  }
+
+  if (!strcmp(resp, "LFD ")) {
+    memset(bs_ip, '\0', sizeof(bs_ip));
+    read_msg(bs_ip, " ");
+
+    memset(bs_port, '\0', sizeof(bs_port));
+    read_msg(bs_port, " ");
+
+    memset(number, '\0', sizeof(number));
+    read_msg(number, " ");
+    n = (int) strtol(number, NULL, 10);
+
+    strcpy(files, dir);
+    strcat(files, " files:");
+    
+    for (int i = 0; i < n-1; i++) {
+      memset(buffer, '\0', sizeof(buffer));
+      read_msg(buffer, " ");
+      strcat(files, "\n - ");
+      strcat(files, buffer);
+
+      memset(buffer, '\0', sizeof(buffer));
+      read_msg(buffer, " ");
+      strcat(files, " ");
+      strcat(files, buffer);
+
+      memset(buffer, '\0', sizeof(buffer));
+      read_msg(buffer, " ");
+      strcat(files, " ");
+      strcat(files, buffer);
+
+      memset(buffer, '\0', sizeof(buffer));
+      read_msg(buffer, " ");
+      strcat(files, " ");
+      strcat(files, buffer);
+    }
+
+    memset(buffer, '\0', sizeof(buffer));
+    read_msg(buffer, " ");
+    strcat(files, "\n - ");
+    strcat(files, buffer);
+
+    memset(buffer, '\0', sizeof(buffer));
+    read_msg(buffer, " ");
+    strcat(files, " ");
+    strcat(files, buffer);
+
+    memset(buffer, '\0', sizeof(buffer));
+    read_msg(buffer, " ");
+    strcat(files, " ");
+    strcat(files, buffer);
+
+    memset(buffer, '\0', sizeof(buffer));
+    read_msg(buffer, "\n");
+    strcat(files, " ");
+    strcat(files, buffer);
+
+    printf("%s\n", files);
   } else {
     printf("Non standard response: %s\n", resp);
     memset(resp, '\0', sizeof(resp));
