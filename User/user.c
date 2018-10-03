@@ -62,10 +62,10 @@ int main(int argc, char *argv[]) {
 
   while (interact) {
     if (login_user[0] == '\0')
-      usr = "Guest";
+      usr = "guest";
     else
       usr = login_user;
-    printf("%s:\n > ", usr);
+    printf("\nUser#%s\n > ", usr);
     fflush(stdout);
 
     fgets(command, MAX_BUFFER, stdin);
@@ -92,7 +92,6 @@ void read_n(char *msg, int nbytes) {
   ptr = msg;
   memset(msg, '\0', nbytes);
   while (nleft > 0) {
-    printf("a\n");
     nr = read(fd,ptr,nleft);
     if (nr == -1) {
       printf("An error ocurred while reading: %s\n", strerror(errno));
@@ -111,6 +110,8 @@ void read_msg(char *msg, char *end) {
   while (1) {
     read_n(buffer, 1);
     if (!strcmp(buffer, end)) {
+      break;
+    } else if (buffer[0] == '\0') {
       break;
     }
     strcat(msg, buffer);
@@ -237,7 +238,7 @@ int login(char *user, char *pass) {
 
     read_n(msg,4);
     if (!strcmp(msg, "AUR ")) {
-      memset(buffer, '\0', MAX_BUFFER);
+      memset(buffer, '\0', sizeof(buffer));
       read_msg(buffer, "\n");
       if (!strcmp(buffer, "OK")) {
         if (login_user[0] == '\0' || login_pass[0] == '\0') {
@@ -271,43 +272,44 @@ void logout() {
 }
 
 void dirlist() {
-  char msg[5], resp[5], number[4], buffer[MAX_BUFFER];
+  char msg[5], resp[5], number[4], buffer[21], dirs[MAX_BUFFER];
   int n;
-  
-  printf("Reauthorizing user\n");
   
   if (!login(login_user, login_pass)){
     printf("Login needed to list directories\n");
     return;
   }
   
-  memset(msg, '\0', 5);
+  memset(msg, '\0', sizeof(msg));
   strcpy(msg, "LSD\n");
   if (write(fd, msg, 4) <= 0) {
     printf("Error writing\n");
     return;
   }
 
-  printf("1\n");
   memset(resp, '\0', sizeof(resp));
   read_n(resp,4);
-  printf("Response read: %s\n", resp);
   if (!strcmp(resp, "LDR ")) {
-    memset(resp, '\0', 4);
     
-    printf("Reading number\n");
-    memset(number, '\0', 4);
+    memset(dirs, '\0', sizeof(dirs));
+    strcpy(dirs, "Directories:");
+    memset(number, '\0', sizeof(number));
     read_msg(number, " ");
-    printf("%s\n", number);
     n = (int) strtol(number, NULL, 10);
-    for (int i = 0; i < n; i++) {
-      memset(buffer, '\0', MAX_BUFFER);
+    for (int i = 0; i < n-1; i++) {
+      memset(buffer, '\0', sizeof(buffer));
       read_msg(buffer, " ");
-      printf("%s\n", buffer);
+      strcat(dirs, "\n -");
+      strcat(dirs, buffer);
     }
+    memset(buffer, '\0', sizeof(buffer));
+    read_msg(buffer, "\n");
+    strcat(dirs, "\n -");
+    strcat(dirs, buffer);
+    printf("%s\n", dirs);
   } else {
     printf("Non standard response: %s\n", resp);
-    memset(resp, '\0', 4);
+    memset(resp, '\0', sizeof(resp));
     return;
   }
 }
