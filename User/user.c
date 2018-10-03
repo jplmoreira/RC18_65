@@ -31,6 +31,7 @@ int login(char *user, char *pass);
 void logout();
 void dirlist();
 void filelist(char *dir);
+void restore(char *dir);
 void leave();
 
 int main(int argc, char *argv[]) {
@@ -226,6 +227,11 @@ void perform_action(char *action, char *action_args) {
       return;
     filelist(action_args);
     disconnect_cs();
+  } else if (!strcmp(action, "restore")) {
+    if (!connect_cs())
+      return;
+    restore(action_args);
+    disconnect_cs();
   } else
     printf("Action not recognized\n");
 
@@ -413,6 +419,42 @@ void filelist(char *dir) {
     strcat(files, buffer);
 
     printf("%s\n", files);
+  } else {
+    printf("Non standard response: %s\n", resp);
+    memset(resp, '\0', sizeof(resp));
+    return;
+  }
+}
+
+void restore(char *dir) {
+  char msg[26], resp[5], bs_ip[MAX_BUFFER], bs_port[MAX_BUFFER];
+  
+  if (!login(login_user, login_pass)){
+    printf("Login needed to list directories\n");
+    return;
+  }
+
+  memset(msg, '\0', sizeof(msg));
+  strcpy(msg, "RST ");
+  strcat(msg, dir);
+  strcat(msg, "\n");
+  if (write(fd, msg, strlen(msg)) <= 0) {
+    printf("Error writing\n");
+    return;
+  }
+
+  memset(resp, '\0', sizeof(resp));
+  if (!read_n(resp,4)) {
+    printf("Connection closed by peer\n");
+    return;
+  }
+
+  if (!strcmp(resp, "RSR ")) {
+    memset(bs_ip, '\0', sizeof(bs_ip));
+    read_msg(bs_ip, " ");
+    memset(bs_port, '\0', sizeof(bs_port));
+    read_msg(bs_port, "\n");
+    printf("ip: %s port: %s\n", bs_ip, bs_port);
   } else {
     printf("Non standard response: %s\n", resp);
     memset(resp, '\0', sizeof(resp));
