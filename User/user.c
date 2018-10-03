@@ -6,6 +6,7 @@
 #include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <errno.h>
 
 #define MAX_BUFFER 512
 #define STANDARD_PORT 58065
@@ -20,7 +21,7 @@ int cs_port = 0;
 char cs_name[MAX_BUFFER], login_user[6], login_pass[9];
 
 void read_n(char *msg, int nbytes);
-void read_msg(char *msg);
+void read_msg(char *msg, char *end);
 void read_args(int argc, char *argv[]);
 int get_argument_type(char *arg);
 int connect_cs();
@@ -87,14 +88,14 @@ void read_n(char *msg, int nbytes) {
   int nr, nleft;
   char *ptr;
 
-  memset(msg, '\0', nbytes);
   nleft = nbytes;
   ptr = msg;
+  memset(msg, '\0', nbytes);
   while (nleft > 0) {
+    printf("a\n");
     nr = read(fd,ptr,nleft);
-    printf("Number: %d\n", nr);
     if (nr == -1) {
-      printf("An error ocurred while reading\n");
+      printf("An error ocurred while reading: %s\n", strerror(errno));
       exit(-1);
     } else if (nr == 0) {
       printf("Connection was closed by peer\n");
@@ -103,14 +104,13 @@ void read_n(char *msg, int nbytes) {
     nleft -= nr;
     ptr += nr;
   }
-  printf("Read: %s\n", msg);
 }
 
-void read_msg(char *msg) {
+void read_msg(char *msg, char *end) {
   char buffer[2];
   while (1) {
     read_n(buffer, 1);
-    if (!strcmp(buffer, "\n")) {
+    if (!strcmp(buffer, end)) {
       break;
     }
     strcat(msg, buffer);
@@ -237,7 +237,7 @@ int login(char *user, char *pass) {
     read_n(msg,4);
     if (!strcmp(msg, "AUR ")) {
       memset(buffer, '\0', MAX_BUFFER);
-      read_msg(buffer);
+      read_msg(buffer, "\n");
       if (!strcmp(buffer, "OK")) {
         if (login_user[0] == '\0' || login_pass[0] == '\0') {
           strcpy(login_user, user);
@@ -270,7 +270,8 @@ void logout() {
 }
 
 void dirlist() {
-  char *msg, resp[4], number[4], buffer[1];
+  char msg[5], resp[5], number[4], buffer[MAX_BUFFER];
+  int n;
   
   printf("Reauthorizing user\n");
   
@@ -278,41 +279,33 @@ void dirlist() {
     printf("Login needed to list directories\n");
     return;
   }
-
-  if (!connect_cs()) {
-    printf("Failed to reconnect\n");
-    return;
-  }
   
-  msg = "LSD\n";
-  if (write(fd, msg, 5) <= 0) {
+  memset(msg, '\0', 5);
+  strcpy(msg, "LSD\n");
+  if (write(fd, msg, 4) <= 0) {
     printf("Error writing\n");
     return;
   }
-  printf("Wrote: %s\n", msg);
 
+  printf("1\n");
   read_n(resp,4);
   printf("Response read: %s\n", resp);
   if (!strcmp(resp, "LDR ")) {
     memset(resp, '\0', 4);
     
     printf("Reading number\n");
-    while(1) {
-      read_n(buffer,1);
-      if (!strcmp(buffer, " ")) {
-        memset(buffer, '\0', 1);
-        free(buffer);
-        break;
-      }
-      strcat(number, buffer);
-      memset(buffer, '\0', 1);
-      free(buffer);
-    }
+    memset(number, '\0', 4);
+    read_msg(number, " ");
     printf("%s\n", number);
+    n = (int) strtol(number, NULL, 10);
+    for (int i = 0; i < n; i++) {
+      memset(buffer, '\0', MAX_BUFFER);
+      read_msg(buffer, " ");
+      printf("%s\n", buffer);
+    }
   } else {
     printf("Non standard response: %s\n", resp);
     memset(resp, '\0', 4);
-    free(resp);
     return;
   }
 }
