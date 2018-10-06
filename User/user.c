@@ -19,7 +19,7 @@ int fd, interact = 1;
 int cs_port = 0;
 char cs_name[MAX_BUFFER], login_user[6], login_pass[9];
 
-int read_n(char *msg, int nbytes, int r_fd);
+int read_n(void *buf, int nbytes, int r_fd);
 void read_msg(char *msg, char *end, int r_fd);
 void read_args(int argc, char *argv[]);
 int get_argument_type(char *arg);
@@ -90,13 +90,12 @@ int main(int argc, char *argv[]) {
   return 0;
 }
 
-int read_n(char *msg, int nbytes, int r_fd) {
+int read_n(void *buf, int nbytes, int r_fd) {
   int nr, nleft;
   char *ptr;
 
   nleft = nbytes;
-  ptr = msg;
-  memset(msg, '\0', nbytes);
+  ptr = buf;
   while (nleft > 0) {
     nr = read(r_fd,ptr,nleft);
     if (nr == -1) {
@@ -114,6 +113,7 @@ int read_n(char *msg, int nbytes, int r_fd) {
 void read_msg(char *msg, char *end, int r_fd) {
   char buffer[2];
   while (1) {
+    memset(buffer, '\0', sizeof(buffer));
     if (!read_n(buffer, 1, r_fd)) {
       printf("Connection closed by peer\n");
       return;
@@ -281,6 +281,7 @@ int login(char *user, char *pass, int l_fd) {
 
     write(fd, login_msg, strlen(login_msg));
 
+    memset(msg, '\0', sizeof(msg));
     if (!read_n(msg,4,l_fd)) {
       printf("Connection closed by peer\n");
       return 0;
@@ -348,17 +349,22 @@ void dirlist() {
     memset(number, '\0', sizeof(number));
     read_msg(number, " ",fd);
     n = (int) strtol(number, NULL, 10);
-    for (int i = 0; i < n-1; i++) {
+
+    if (n > 0) {
+      for (int i = 0; i < n-1; i++) {
+        memset(buffer, '\0', sizeof(buffer));
+        read_msg(buffer, " ",fd);
+        strcat(dirs, "\n - ");
+        strcat(dirs, buffer);
+      }
       memset(buffer, '\0', sizeof(buffer));
-      read_msg(buffer, " ",fd);
+      read_msg(buffer, "\n",fd);
       strcat(dirs, "\n - ");
       strcat(dirs, buffer);
+      printf("%s\n", dirs);
+    } else {
+      printf("%s has no backed up directories\n", login_user);
     }
-    memset(buffer, '\0', sizeof(buffer));
-    read_msg(buffer, "\n",fd);
-    strcat(dirs, "\n - ");
-    strcat(dirs, buffer);
-    printf("%s\n", dirs);
   } else {
     printf("Non standard response: %s\n", resp);
     memset(resp, '\0', sizeof(resp));
@@ -402,52 +408,39 @@ void filelist(char *dir) {
     read_msg(number, " ",fd);
     n = (int) strtol(number, NULL, 10);
 
-    strcpy(files, dir);
-    strcat(files, " files:");
+    if (n > 0) {
+      strcpy(files, dir);
+      strcat(files, " files:");
     
-    for (int i = 0; i < n-1; i++) {
-      memset(buffer, '\0', sizeof(buffer));
-      read_msg(buffer, " ",fd);
-      strcat(files, "\n - ");
-      strcat(files, buffer);
+      for (int i = 0; i < n; i++) {
+        memset(buffer, '\0', sizeof(buffer));
+        read_msg(buffer, " ",fd);
+        strcat(files, "\n - ");
+        strcat(files, buffer);
 
-      memset(buffer, '\0', sizeof(buffer));
-      read_msg(buffer, " ",fd);
-      strcat(files, " ");
-      strcat(files, buffer);
+        memset(buffer, '\0', sizeof(buffer));
+        read_msg(buffer, " ",fd);
+        strcat(files, " ");
+        strcat(files, buffer);
 
-      memset(buffer, '\0', sizeof(buffer));
-      read_msg(buffer, " ",fd);
-      strcat(files, " ");
-      strcat(files, buffer);
+        memset(buffer, '\0', sizeof(buffer));
+        read_msg(buffer, " ",fd);
+        strcat(files, " ");
+        strcat(files, buffer);
 
-      memset(buffer, '\0', sizeof(buffer));
-      read_msg(buffer, " ",fd);
-      strcat(files, " ");
-      strcat(files, buffer);
+        memset(buffer, '\0', sizeof(buffer));
+        if (i < n - 1) {
+          read_msg(buffer, " ",fd);
+        } else {
+          read_msg(buffer, "\n", fd);
+        }
+        strcat(files, " ");
+        strcat(files, buffer);
+      }
+      printf("%s\n", files);
+    } else {
+      printf("There are no files in %s\n", dir);
     }
-
-    memset(buffer, '\0', sizeof(buffer));
-    read_msg(buffer, " ",fd);
-    strcat(files, "\n - ");
-    strcat(files, buffer);
-
-    memset(buffer, '\0', sizeof(buffer));
-    read_msg(buffer, " ",fd);
-    strcat(files, " ");
-    strcat(files, buffer);
-
-    memset(buffer, '\0', sizeof(buffer));
-    read_msg(buffer, " ",fd);
-    strcat(files, " ");
-    strcat(files, buffer);
-
-    memset(buffer, '\0', sizeof(buffer));
-    read_msg(buffer, "\n",fd);
-    strcat(files, " ");
-    strcat(files, buffer);
-
-    printf("%s\n", files);
   } else {
     printf("Non standard response: %s\n", resp);
     memset(resp, '\0', sizeof(resp));
@@ -456,9 +449,10 @@ void filelist(char *dir) {
 }
 
 void restore(char *dir) {
-  char msg[26], resp[5], bs_ip[MAX_BUFFER], bs_port[MAX_BUFFER], buffer[MAX_BUFFER];
+  char msg[26], resp[5], number[4], bs_ip[MAX_BUFFER], bs_port[MAX_BUFFER];
+  char file_name[MAX_BUFFER], file_date[MAX_BUFFER], file_time[MAX_BUFFER], file_size[MAX_BUFFER];
   long port;
-  int bs_fd;
+  int bs_fd, n;
   struct stat st = {0};
 
   if (!connect_cs())
@@ -528,9 +522,47 @@ void restore(char *dir) {
       mkdir(dir, 0700);
     }
 
-    memset(buffer, '\0', sizeof(buffer));
-    read_msg(buffer, " ",bs_fd);
-    printf("Number: %s\n", buffer);
+    memset(number, '\0', sizeof(number));
+    read_msg(number, " ",bs_fd);
+    printf("Number: %s\n", number);
+    n = (int) strtol(number, NULL, 10);
+
+    if (n > 0) {
+      char name[MAX_BUFFER];
+      long size;
+      FILE *fp;
+      void *buffer;
+      for (int i = 0; i < n; i++) {
+        memset(file_name, '\0', sizeof(file_name));
+        read_msg(file_name," ",bs_fd);
+        memset(file_date, '\0', sizeof(file_date));
+        read_msg(file_date, " ", bs_fd);
+        memset(file_time, '\0', sizeof(file_time));
+        read_msg(file_time, " ", bs_fd);
+        memset(file_size, '\0', sizeof(file_size));
+        read_msg(file_size, " ", bs_fd);
+
+        memset(name, '\0', sizeof(name));
+        strcpy(name, dir);
+        strcat(name, "/");
+        strcat(name, file_name);
+        fp = fopen(name, "w");
+
+        size = strtol(file_size, NULL, 10);
+        buffer = malloc(size);
+        
+        read_n(buffer, size, bs_fd);
+        fwrite(buffer, size, 1, fp);
+        fclose(fp);
+        free(buffer);
+
+        if (i < n-1) {
+          read_msg(msg, " ", bs_fd);
+        }
+      }
+    } else {
+      printf("There are no files in %s to restore\n", dir);
+    }
   } else {
     printf("Non standard response: %s\n", resp);
     memset(resp, '\0', sizeof(resp));
