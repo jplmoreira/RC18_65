@@ -33,6 +33,7 @@ void logout();
 void dirlist();
 void filelist(char *dir);
 void restore(char *dir);
+void deluser();
 void leave();
 
 int main(int argc, char *argv[]) {
@@ -261,6 +262,8 @@ void perform_action(char *action, char *action_args) {
     disconnect_cs();
   } else if (!strcmp(action, "restore")) {
     restore(action_args);
+  }else if (!strcmp(action, "deluser")) {
+    deluser();
   } else
     printf("Action not recognized\n");
 
@@ -499,6 +502,7 @@ void restore(char *dir) {
 
   if (!login(login_user, login_pass, bs_fd)){
     printf("Login needed to list directories\n");
+    disconnect_bs(bs_fd);
     return;
   }
 
@@ -508,12 +512,14 @@ void restore(char *dir) {
   strcat(msg, "\n");
   if (write(bs_fd, msg, strlen(msg)) <= 0) {
     printf("Error writing\n");
+    disconnect_bs(bs_fd);
     return;
   }
 
   memset(resp, '\0', sizeof(resp));
   if (!read_n(resp,4,bs_fd)) {
     printf("Connection closed by peer\n");
+    disconnect_bs(bs_fd);
     return;
   }
 
@@ -524,7 +530,6 @@ void restore(char *dir) {
 
     memset(number, '\0', sizeof(number));
     read_msg(number, " ",bs_fd);
-    printf("Number: %s\n", number);
     n = (int) strtol(number, NULL, 10);
 
     if (n > 0) {
@@ -563,9 +568,54 @@ void restore(char *dir) {
     } else {
       printf("There are no files in %s to restore\n", dir);
     }
+    disconnect_bs(bs_fd);
   } else {
     printf("Non standard response: %s\n", resp);
     memset(resp, '\0', sizeof(resp));
+    disconnect_bs(bs_fd);
+    return;
+  }
+}
+
+void deluser() {
+  char msg[5], resp[5];
+
+  if (!connect_cs())
+    return;
+
+  if (!login(login_user, login_pass, fd)){
+    printf("Login needed to list directories\n");
+    return;
+  }
+
+  memset(msg, '\0', sizeof(msg));
+  strcpy(msg, "DLU\n");
+  if (write(fd, msg, strlen(msg)) <= 0) {
+    printf("Error writing\n");
+    return;
+  }
+
+  memset(resp, '\0', sizeof(resp));
+  if (!read_n(resp,4,fd)) {
+    printf("Connection closed by peer\n");
+    return;
+  }
+
+  if (!strcmp(resp, "DLR ")) {
+    memset(resp, '\0', sizeof(resp));
+    read_msg(resp, "\n", fd);
+    if (!strcmp(resp, "OK"))
+      printf("User deleted");
+    else if (!strcmp(resp, "NOK"))
+      printf("User still has information stored\n");
+    else
+      printf("Status not recognized\n");
+
+    disconnect_cs();
+  } else {
+    printf("Non standard response: %s\n", resp);
+    memset(resp, '\0', sizeof(resp));
+    disconnect_cs();
     return;
   }
 }
