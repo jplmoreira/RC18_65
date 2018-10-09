@@ -1,3 +1,5 @@
+#include "../utilities.h"
+
 #include <unistd.h>
 #include <sys/socket.h>
 #include <sys/types.h>
@@ -15,18 +17,12 @@
 struct hostent *hostptr;
 struct sockaddr_in serveraddr;
 
-int fd, interact = 1;
+int interact = 1;
 int cs_port = 0;
 char cs_name[MAX_BUFFER], login_user[6], login_pass[9];
 
-int read_n(void *buf, int nbytes, int r_fd);
-void read_msg(char *msg, char *end, int r_fd);
 void read_args(int argc, char *argv[]);
 int get_argument_type(char *arg);
-int connect_cs();
-void disconnect_cs();
-int connect_bs(char *ip, long port);
-void disconnect_bs(int bs_fd);
 void perform_action(char *action, char *action_args);
 int login(char *user, char *pass, int l_fd);
 void logout();
@@ -34,6 +30,7 @@ void dirlist();
 void filelist(char *dir);
 void restore(char *dir);
 void deluser();
+void deldir(char *dir);
 void leave();
 
 int main(int argc, char *argv[]) {
@@ -91,44 +88,6 @@ int main(int argc, char *argv[]) {
   return 0;
 }
 
-int read_n(void *buf, int nbytes, int r_fd) {
-  int nr, nleft;
-  char *ptr;
-
-  nleft = nbytes;
-  ptr = buf;
-  while (nleft > 0) {
-    nr = read(r_fd,ptr,nleft);
-    if (nr == -1) {
-      printf("An error ocurred while reading: %s\n", strerror(errno));
-      exit(-1);
-    } else if (nr == 0) {
-      return 0;
-    }
-    nleft -= nr;
-    ptr += nr;
-  }
-  return 1;
-}
-
-void read_msg(char *msg, char *end, int r_fd) {
-  char buffer[2];
-  while (1) {
-    memset(buffer, '\0', sizeof(buffer));
-    if (!read_n(buffer, 1, r_fd)) {
-      printf("Connection closed by peer\n");
-      return;
-    }
-
-    if (!strcmp(buffer, end)) {
-      break;
-    } else if (buffer[0] == '\0') {
-      break;
-    }
-    strcat(msg, buffer);
-  }
-}
-
 void read_args(int argc, char *argv[]) {
   if (argc % 2 == 0) {
     printf("Wrong argument numbers: you should disclose the CS server name and port by using the flags -n and -p respectively\n");
@@ -172,63 +131,11 @@ int get_argument_type(char *arg) {
   }
 }
 
-int connect_cs() {
-
-  printf("Connecting to %s:%d\n", cs_name, cs_port);
-
-  fd = socket(AF_INET,SOCK_STREAM,0);
-  hostptr = gethostbyname(cs_name);
-
-  memset((void*) &serveraddr, (int) '\0', sizeof(serveraddr));
-  serveraddr.sin_family = AF_INET;
-  serveraddr.sin_addr.s_addr = ((struct in_addr *) (hostptr->h_addr_list[0]))->s_addr;
-  serveraddr.sin_port = htons((u_short) cs_port);
-
-  if (connect(fd, (struct sockaddr*) &serveraddr, sizeof(serveraddr)) == -1) {
-    printf("Failed to connect\n");
-    return 0;
-  }
-
-  printf("Connected to server\n");
-  return 1;
-}
-
-void disconnect_cs() {
-  close(fd);
-}
-
-int connect_bs(char *ip, long port) {
-  int fd;
-  struct hostent *bs_hostptr;
-  struct sockaddr_in bs_serveraddr;
-
-
-  printf("Connecting to BS %s:%ld\n", ip, port);
-  fd = socket(AF_INET,SOCK_STREAM,0);
-  bs_hostptr = gethostbyname(ip);
-
-  memset((void*) &bs_serveraddr, (int) '\0', sizeof(bs_serveraddr));
-  bs_serveraddr.sin_family = AF_INET;
-  bs_serveraddr.sin_addr.s_addr = ((struct in_addr *) (bs_hostptr->h_addr_list[0]))->s_addr;
-  bs_serveraddr.sin_port = htons((u_short) port);
-
-  if (connect(fd, (struct sockaddr*) &bs_serveraddr, sizeof(bs_serveraddr)) == -1) {
-    printf("Failed to connect to backup\n");
-    return -1;
-  }
-
-  printf("Connected to backup\n");
-  return fd;
-}
-
-void disconnect_bs(int bs_fd) {
-  close(bs_fd);
-}
-
 void perform_action(char *action, char *action_args) {
   if (!strcmp(action, "login")) {
     char *user;
     char *pass;
+    int cs_fd;
 
     user = strtok(action_args, " ");
     pass = strtok(NULL, "\n");
@@ -238,32 +145,28 @@ void perform_action(char *action, char *action_args) {
       return;
     }
 
-    if (!connect_cs())
+    if ((cs_fd = tcp_connect(cs_name, cs_port)) == -1)
       return;
     
-    if (login(user, pass,fd))
+    if (login(user, pass, cs_fd))
       printf("Login successful\n");
     else
       printf("Failed to login\n");
-    disconnect_cs();
+    tcp_disconnect(cs_fd);
   } else if (!strcmp(action, "logout")) {
     logout();
   } else if (!strcmp(action, "exit")) {
     leave();
   } else if (!strcmp(action, "dirlist")) {
-    if (!connect_cs())
-      return;
     dirlist();
-    disconnect_cs();
   } else if (!strcmp(action, "filelist")) {
-    if (!connect_cs())
-      return;
     filelist(action_args);
-    disconnect_cs();
   } else if (!strcmp(action, "restore")) {
     restore(action_args);
-  }else if (!strcmp(action, "deluser")) {
+  } else if (!strcmp(action, "deluser")) {
     deluser();
+  } else if (!strcmp(action, "delete")) {
+    deldir(action_args);
   } else
     printf("Action not recognized\n");
 
@@ -282,16 +185,20 @@ int login(char *user, char *pass, int l_fd) {
     strcat(login_msg, pass);
     strcat(login_msg, "\n");
 
-    write(fd, login_msg, strlen(login_msg));
+    if(!write_n(login_msg, strlen(login_msg), l_fd)) {
+      printf("Connection closed by peer");
+      return 0;
+    }
 
     memset(msg, '\0', sizeof(msg));
     if (!read_n(msg,4,l_fd)) {
       printf("Connection closed by peer\n");
       return 0;
     }
+
     if (!strcmp(msg, "AUR ")) {
       memset(buffer, '\0', sizeof(buffer));
-      read_msg(buffer, "\n",fd);
+      read_msg(buffer, "\n", l_fd);
       if (!strcmp(buffer, "OK")) {
         if (login_user[0] == '\0' || login_pass[0] == '\0') {
           strcpy(login_user, user);
@@ -305,6 +212,7 @@ int login(char *user, char *pass, int l_fd) {
       else if (!strcmp(buffer, "NEW")) {
         strcpy(login_user, user);
         strcpy(login_pass, pass);
+        printf("New user createad\n");
         return 1;
       } else {
         printf("Unknown response arguments: %s\n", buffer);
@@ -325,23 +233,29 @@ void logout() {
 
 void dirlist() {
   char msg[5], resp[5], number[4], buffer[21], dirs[MAX_BUFFER];
-  int n;
+  int n, cs_fd;
   
-  if (!login(login_user, login_pass,fd)){
+  if ((cs_fd = tcp_connect(cs_name, cs_port)) == -1)
+    return;
+
+  if (!login(login_user, login_pass, cs_fd)){
     printf("Login needed to list directories\n");
+    tcp_disconnect(cs_fd);
     return;
   }
   
   memset(msg, '\0', sizeof(msg));
   strcpy(msg, "LSD\n");
-  if (write(fd, msg, 4) <= 0) {
+  if (!write_n(msg, strlen(msg), cs_fd)) {
     printf("Error writing\n");
+    tcp_disconnect(cs_fd);
     return;
   }
 
   memset(resp, '\0', sizeof(resp));
-  if (!read_n(resp,4,fd)) {
+  if (!read_n(resp,4,cs_fd)) {
     printf("Connection closed by peer\n");
+    tcp_disconnect(cs_fd);
     return;
   }
   
@@ -350,27 +264,29 @@ void dirlist() {
     memset(dirs, '\0', sizeof(dirs));
     strcpy(dirs, "Directories:");
     memset(number, '\0', sizeof(number));
-    read_msg(number, " ",fd);
+    read_msg(number, " ", cs_fd);
     n = (int) strtol(number, NULL, 10);
 
     if (n > 0) {
       for (int i = 0; i < n-1; i++) {
         memset(buffer, '\0', sizeof(buffer));
-        read_msg(buffer, " ",fd);
+        read_msg(buffer, " ", cs_fd);
         strcat(dirs, "\n - ");
         strcat(dirs, buffer);
       }
       memset(buffer, '\0', sizeof(buffer));
-      read_msg(buffer, "\n",fd);
+      read_msg(buffer, "\n", cs_fd);
       strcat(dirs, "\n - ");
       strcat(dirs, buffer);
       printf("%s\n", dirs);
     } else {
       printf("%s has no backed up directories\n", login_user);
     }
+
+    tcp_disconnect(cs_fd);
   } else {
     printf("Non standard response: %s\n", resp);
-    memset(resp, '\0', sizeof(resp));
+    tcp_disconnect(cs_fd);
     return;
   }
 }
@@ -378,10 +294,14 @@ void dirlist() {
 void filelist(char *dir) {
   char msg[26], resp[5], number[4];
   char buffer[MAX_BUFFER], bs_ip[MAX_BUFFER], bs_port[MAX_BUFFER], files[MAX_BUFFER];
-  int n;
+  int n, cs_fd;
   
-  if (!login(login_user, login_pass,fd)){
+  if ((cs_fd = tcp_connect(cs_name, cs_port)) == -1)
+    return;
+
+  if (!login(login_user, login_pass, cs_fd)){
     printf("Login needed to list directories\n");
+    tcp_disconnect(cs_fd);
     return;
   }
 
@@ -389,26 +309,28 @@ void filelist(char *dir) {
   strcpy(msg, "LSF ");
   strcat(msg, dir);
   strcat(msg, "\n");
-  if (write(fd, msg, strlen(msg)) <= 0) {
+  if (!write_n(msg, strlen(msg), cs_fd)) {
     printf("Error writing\n");
+    tcp_disconnect(cs_fd);
     return;
   }
   
   memset(resp, '\0', sizeof(resp));
-  if (!read_n(resp,4,fd)) {
+  if (!read_n(resp,4,cs_fd)) {
     printf("Connection closed by peer\n");
+    tcp_disconnect(cs_fd);
     return;
   }
 
   if (!strcmp(resp, "LFD ")) {
     memset(bs_ip, '\0', sizeof(bs_ip));
-    read_msg(bs_ip, " ",fd);
+    read_msg(bs_ip, " ", cs_fd);
 
     memset(bs_port, '\0', sizeof(bs_port));
-    read_msg(bs_port, " ",fd);
+    read_msg(bs_port, " ", cs_fd);
 
     memset(number, '\0', sizeof(number));
-    read_msg(number, " ",fd);
+    read_msg(number, " ", cs_fd);
     n = (int) strtol(number, NULL, 10);
 
     if (n > 0) {
@@ -417,25 +339,25 @@ void filelist(char *dir) {
     
       for (int i = 0; i < n; i++) {
         memset(buffer, '\0', sizeof(buffer));
-        read_msg(buffer, " ",fd);
+        read_msg(buffer, " ",cs_fd);
         strcat(files, "\n - ");
         strcat(files, buffer);
 
         memset(buffer, '\0', sizeof(buffer));
-        read_msg(buffer, " ",fd);
+        read_msg(buffer, " ",cs_fd);
         strcat(files, " ");
         strcat(files, buffer);
 
         memset(buffer, '\0', sizeof(buffer));
-        read_msg(buffer, " ",fd);
+        read_msg(buffer, " ",cs_fd);
         strcat(files, " ");
         strcat(files, buffer);
 
         memset(buffer, '\0', sizeof(buffer));
         if (i < n - 1) {
-          read_msg(buffer, " ",fd);
+          read_msg(buffer, " ",cs_fd);
         } else {
-          read_msg(buffer, "\n", fd);
+          read_msg(buffer, "\n", cs_fd);
         }
         strcat(files, " ");
         strcat(files, buffer);
@@ -444,9 +366,10 @@ void filelist(char *dir) {
     } else {
       printf("There are no files in %s\n", dir);
     }
+    tcp_disconnect(cs_fd);
   } else {
     printf("Non standard response: %s\n", resp);
-    memset(resp, '\0', sizeof(resp));
+    tcp_disconnect(cs_fd);
     return;
   }
 }
@@ -455,14 +378,15 @@ void restore(char *dir) {
   char msg[26], resp[5], number[4], bs_ip[MAX_BUFFER], bs_port[MAX_BUFFER];
   char file_name[MAX_BUFFER], file_date[MAX_BUFFER], file_time[MAX_BUFFER], file_size[MAX_BUFFER];
   long port;
-  int bs_fd, n;
+  int bs_fd, n, cs_fd;
   struct stat st = {0};
 
-  if (!connect_cs())
+  if ((cs_fd = tcp_connect(cs_name, cs_port)) == -1)
     return;
 
-  if (!login(login_user, login_pass, fd)){
+  if (!login(login_user, login_pass, cs_fd)){
     printf("Login needed to list directories\n");
+    tcp_disconnect(cs_fd);
     return;
   }
 
@@ -470,39 +394,40 @@ void restore(char *dir) {
   strcpy(msg, "RST ");
   strcat(msg, dir);
   strcat(msg, "\n");
-  if (write(fd, msg, strlen(msg)) <= 0) {
+  if (!write_n(msg, strlen(msg), cs_fd)) {
     printf("Error writing\n");
+    tcp_disconnect(cs_fd);
     return;
   }
 
   memset(resp, '\0', sizeof(resp));
-  if (!read_n(resp,4,fd)) {
+  if (!read_n(resp,4,cs_fd)) {
     printf("Connection closed by peer\n");
+    tcp_disconnect(cs_fd);
     return;
   }
 
   if (!strcmp(resp, "RSR ")) {
     memset(bs_ip, '\0', sizeof(bs_ip));
-    read_msg(bs_ip, " ",fd);
+    read_msg(bs_ip, " ", cs_fd);
     memset(bs_port, '\0', sizeof(bs_port));
-    read_msg(bs_port, "\n",fd);
+    read_msg(bs_port, "\n",cs_fd);
   } else {
     printf("Non standard response: %s\n", resp);
-    memset(resp, '\0', sizeof(resp));
+    tcp_disconnect(cs_fd);
     return;
   }
 
-  disconnect_cs();
+  tcp_disconnect(cs_fd);
 
   port = strtol(bs_port, NULL, 10);
   
-  if ((bs_fd = connect_bs(bs_ip, port)) == -1) {
+  if ((bs_fd = tcp_connect(bs_ip, port)) == -1)
     return;
-  }
 
   if (!login(login_user, login_pass, bs_fd)){
     printf("Login needed to list directories\n");
-    disconnect_bs(bs_fd);
+    tcp_disconnect(bs_fd);
     return;
   }
 
@@ -510,16 +435,16 @@ void restore(char *dir) {
   strcpy(msg, "RSB ");
   strcat(msg, dir);
   strcat(msg, "\n");
-  if (write(bs_fd, msg, strlen(msg)) <= 0) {
+  if (!write_n(msg, strlen(msg), bs_fd)) {
     printf("Error writing\n");
-    disconnect_bs(bs_fd);
+    tcp_disconnect(bs_fd);
     return;
   }
 
   memset(resp, '\0', sizeof(resp));
   if (!read_n(resp,4,bs_fd)) {
     printf("Connection closed by peer\n");
-    disconnect_bs(bs_fd);
+    tcp_disconnect(bs_fd);
     return;
   }
 
@@ -556,7 +481,12 @@ void restore(char *dir) {
         size = strtol(file_size, NULL, 10);
         buffer = malloc(size);
         
-        read_n(buffer, size, bs_fd);
+        if (!read_n(buffer, size, bs_fd)) {
+          printf("Connection closed by peer\n");
+          fclose(fp);
+          tcp_disconnect(bs_fd);
+          return;
+        }
         fwrite(buffer, size, 1, fp);
         fclose(fp);
         free(buffer);
@@ -568,54 +498,102 @@ void restore(char *dir) {
     } else {
       printf("There are no files in %s to restore\n", dir);
     }
-    disconnect_bs(bs_fd);
+    tcp_disconnect(bs_fd);
   } else {
     printf("Non standard response: %s\n", resp);
-    memset(resp, '\0', sizeof(resp));
-    disconnect_bs(bs_fd);
+    tcp_disconnect(bs_fd);
     return;
   }
 }
 
 void deluser() {
   char msg[5], resp[5];
+  int cs_fd;
 
-  if (!connect_cs())
+  if ((cs_fd = tcp_connect(cs_name, cs_port)) == -1)
     return;
 
-  if (!login(login_user, login_pass, fd)){
+  if (!login(login_user, login_pass, cs_fd)){
     printf("Login needed to list directories\n");
     return;
   }
 
   memset(msg, '\0', sizeof(msg));
   strcpy(msg, "DLU\n");
-  if (write(fd, msg, strlen(msg)) <= 0) {
+  if (!write_n(msg, strlen(msg), cs_fd)) {
     printf("Error writing\n");
     return;
   }
 
   memset(resp, '\0', sizeof(resp));
-  if (!read_n(resp,4,fd)) {
+  if (!read_n(resp,4,cs_fd)) {
     printf("Connection closed by peer\n");
     return;
   }
 
   if (!strcmp(resp, "DLR ")) {
     memset(resp, '\0', sizeof(resp));
-    read_msg(resp, "\n", fd);
-    if (!strcmp(resp, "OK"))
-      printf("User deleted");
+    read_msg(resp, "\n", cs_fd);
+    if (!strcmp(resp, "OK")) {
+      printf("User deleted\n");
+      logout();
+    }
     else if (!strcmp(resp, "NOK"))
       printf("User still has information stored\n");
     else
       printf("Status not recognized\n");
 
-    disconnect_cs();
+    tcp_disconnect(cs_fd);
   } else {
     printf("Non standard response: %s\n", resp);
+    tcp_disconnect(cs_fd);
+    return;
+  }
+}
+
+void deldir(char *dir) {
+  char resp[5], msg[25];
+  int cs_fd;
+
+  if ((cs_fd = tcp_connect(cs_name, cs_port)) == -1)
+    return;
+
+  if (!login(login_user, login_pass, cs_fd)){
+    printf("Login needed to list directories\n");
+    tcp_disconnect(cs_fd);
+    return;
+  }
+
+  memset(msg, '\0', sizeof(msg));
+  strcpy(msg, "DLU ");
+  strcat(msg, dir);
+  if (!write_n(msg, strlen(msg), cs_fd)) {
+    printf("Error writing\n");
+    tcp_disconnect(cs_fd);
+    return;
+  }
+
+  memset(resp, '\0', sizeof(resp));
+  if (!read_n(resp,4,cs_fd)) {
+    printf("Connection closed by peer\n");
+    tcp_disconnect(cs_fd);
+    return;
+  }
+
+  if (!strcmp(resp, "DDR ")) {
     memset(resp, '\0', sizeof(resp));
-    disconnect_cs();
+    read_msg(resp, "\n", cs_fd);
+    if (!strcmp(resp, "OK"))
+      printf("Directory deleted\n");
+    else if (!strcmp(resp, "NOK"))
+      printf("Unable to delete %s\n", dir);
+    else
+      printf("Status not recognized\n");
+
+    tcp_disconnect(cs_fd);
+  } else {
+    printf("Non standard response: %s\n", resp);
+    tcp_disconnect(cs_fd);
     return;
   }
 }
