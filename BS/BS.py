@@ -11,7 +11,7 @@ STANDART_PORTBS = 59000
 TASK = 0
 server_answer = ""
 
-USERS = ["99999 zzzzzzzz"]
+USERS = [" 99999 zzzzzzzz"]
 
 
 CSport = 0
