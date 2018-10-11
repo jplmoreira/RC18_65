@@ -33,10 +33,15 @@ def get_argument_type(arg):
 
 
 def authenticate_usr(key):
+	msg = ""
 	for i in range(len(USERS)):
 		if (key[4:]==USERS[i][4:]):
-				return "AUR OK"
-		return "AUR NOK"
+				msg = "AUR OK"
+				server_msg = msg.encode()
+				return server_msg
+		msg = "AUR NOK"
+		server_msg = msg.encode()
+		return server_msg
 				
 	
 #def upload_files_to_dir(files):
@@ -47,7 +52,7 @@ def authenticate_usr(key):
 def thread(connection):
 
 	user_msg = connection.recv(MAX_BUFFER)
-	msg_request = user_msg.decode().split()
+	msg_request = user_msg.decode()
 	request_task = msg_request[TASK]
 	print(request_task)
 
