@@ -19,15 +19,15 @@
 int port = 0;
 int running = 1;
 int cs_fd;
-char usrs[MAX_BUFFER][MAX_BUFFER] = { "" };
 
 void read_args(int argc, char *argv[]);
 void check_argument_type(char *arg);
 void handle_signal();
-void getusrs();
-void saveusrs();
+void getusrs(char usrs[][15]);
 void *usr_thread(void *args);
-void read_usr(int cs_fd, int usr_fd);
+void read_usr(int usr_fd);
+int verify_usr(char *usr);
+void write_usr(char *usr);
 
 int main(int argc, char *argv[]){
   pthread_t usr_t;
@@ -46,8 +46,6 @@ int main(int argc, char *argv[]){
   if (port == 0) {
     port = STANDARD_PORT;
   }
-
-  getusrs();
   
   cs_fd = tcp_server(port);
 
@@ -69,8 +67,6 @@ int main(int argc, char *argv[]){
     printf("Error joining the thread: %s\n", strerror(errno));
     return -1;
   }
-
-  /* saveusrs(); */
 
   return 0;
 }
@@ -103,7 +99,7 @@ void handle_signal() {
   running = 0;
 }
 
-void getusrs() {
+void getusrs(char usrs[][15]) {
   int i = 0;
   char line[MAX_BUFFER];
   FILE *fp;
@@ -123,29 +119,6 @@ void getusrs() {
   fclose(fp);
 }
 
-void saveusrs() {
-  FILE *fp;
-  int first = 0;
-
-  if ((fp = fopen("users.txt", "w")) == NULL) {
-    printf("Error saving the users: %s\n", strerror(errno));
-    exit(-1);
-  }
-
-  for (int i = 0; i < MAX_BUFFER; i++) {
-    if (strlen(usrs[i]) == 14) {
-      if (first) {
-        fprintf(fp, "\n%s", usrs[i]);
-      } else {
-        first = 1;
-        fprintf(fp, "%s", usrs[i]);
-      }
-    }
-  }
-
-  fclose(fp);
-}
-
 void *usr_thread() {
   struct sockaddr_in clientaddr;
   unsigned int clientlen = sizeof(clientaddr);
@@ -159,11 +132,11 @@ void *usr_thread() {
       return NULL;
     }
 
-    printf("Connected to: %d", clientaddr.sin_addr.s_addr);
+    printf("Connected to: %d\n", clientaddr.sin_addr.s_addr);
 
     usr_pid = fork();
     if (usr_pid == 0) {
-      read_usr(cs_fd, usr_fd);
+      read_usr(usr_fd);
       exit(1);
     } else if (usr_pid < 0) {
       printf("Error forking: %s\n", strerror(errno));
@@ -173,6 +146,84 @@ void *usr_thread() {
   return 0;
 }
 
-void read_usr(int cs_fd, int usr_fd) {
+void read_usr(int usr_fd) {
+  char msg[5], buffer[MAX_BUFFER], usr[15];
   
+  memset(msg, '\0', sizeof(msg));
+  if (!read_n(msg, 4, usr_fd)) {
+    printf("Connection closed by peer\n");
+    return;
+  }
+
+  if (!strcmp(msg, "AUT ")) {
+    memset(buffer, '\0', sizeof(buffer));
+    read_msg(buffer, "\n", usr_fd);
+    memset(usr, '\0', sizeof(usr));
+    strcpy(usr, buffer);
+    int res = verify_usr(buffer);
+    memset(buffer, '\0', sizeof(buffer));
+    if (res == 1) {
+      strcpy(buffer, "AUR OK\n");
+      printf("User authorized\n");
+    } else if (res == 0) {
+      strcpy(buffer, "AUR NEW\n");
+      printf("User created\n");
+      write_usr(usr);
+    } else {
+      strcpy(buffer, "AUR NOK\n");
+      printf("User not authorized\n");
+    }
+    if (!write_n(buffer, strlen(buffer), usr_fd)) {
+      printf("Connection closed by peer\n");
+      return;
+    }
+  } else {
+    printf("Error: Non standard response %s\n", msg);
+    return;
+  }
+}
+
+int verify_usr(char *usr) {
+  char *a, *b, bufa[MAX_BUFFER], bufb[MAX_BUFFER];
+  char usrs[MAX_BUFFER][15];
+
+  getusrs(usrs);
+
+  for (int i = 0; i < MAX_BUFFER; i++) {
+    if (!strcmp(usr, usrs[i]))
+      return 1;
+    else if (strlen(usrs[i]) == 14) {
+      memset(bufa, '\0', sizeof(bufa));
+      strcpy(bufa, usrs[i]);
+      a = strtok(bufa, " ");
+      memset(bufb, '\0', sizeof(bufb));
+      strcpy(bufb, usr);
+      b = strtok(bufb, " ");
+      if (!strcmp(a, b)) {
+        return -1;
+      }
+    }
+  }
+  return 0;
+}
+
+void write_usr(char *usr) {
+  struct stat st = {0};
+  int file = 1;
+  FILE *fp;
+
+  if (stat("users.txt", &st) == -1)
+    file = 0;
+  
+  if ((fp = fopen("users.txt", "a")) == NULL) {
+    printf("Error saving the users: %s\n", strerror(errno));
+    exit(-1);
+  }
+
+  if (file)
+    fprintf(fp, "\n%s", usr);
+  else
+    fprintf(fp, "%s", usr);
+  
+  fclose(fp);
 }

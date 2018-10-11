@@ -1,4 +1,4 @@
-UserFolder = User
+UserFolder = User CS
 
 TOPTARGETS := all clean
 
