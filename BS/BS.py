@@ -72,6 +72,8 @@ def thread(connection):
 				else:
 					print("ERR")
 					break	
+	connection.close()
+	server_sock.close()
 	return 0
 
 			
@@ -118,13 +120,12 @@ server_sock.bind((host_name, BSport))
 server_sock.listen(10)
 
 print("Waiting for connection...\n")
-connection, client_address = server_sock.accept()
-print("Connection succefully established\n")
+
 while 1:
-	
+	connection, client_address = server_sock.accept()
+	print("Connection succefully established\n")
 	start_new_thread(thread, (connection,))
-connection.close()
-server_sock.close()
+
 
 
 
