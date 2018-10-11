@@ -34,8 +34,8 @@ def get_argument_type(arg):
 
 def authenticate_usr(key):
 	msg = ""
-	i = 0
 	for i in range(len(USERS)):
+		print("KEY: ", key[4:], " USER : ", USERS[i])
 		if (key[4:]==USERS[i]):
 			print(key[4:])
 			msg = "AUR OK"
