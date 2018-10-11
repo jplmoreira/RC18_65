@@ -119,8 +119,9 @@ server_sock.listen(10)
 
 print("Waiting for connection...\n")
 connection, client_address = server_sock.accept()
+print("Connection succefully established\n")
 while 1:
-	print("Connection succefully established\n")
+	
 	start_new_thread(thread, (connection,))
 connection.close()
 server_sock.close()
