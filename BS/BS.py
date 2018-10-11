@@ -46,8 +46,8 @@ def authenticate_usr(key):
 
 def thread(connection):
 
-	user_msg = connection.recv(MAX_BUFFER)
-	msg_request = user_msg.decode().split()
+	msg_request = connection.recv(MAX_BUFFER)
+	#msg_request = user_msg.decode().split()
 	request_task = msg_request[TASK]
 
 	if (request_task[:3] == "AUT"):
