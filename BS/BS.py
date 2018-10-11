@@ -46,9 +46,10 @@ def authenticate_usr(key):
 
 def thread(connection):
 
-	msg_request = connection.recv(MAX_BUFFER)
-	#msg_request = user_msg.decode().split()
+	user_msg = connection.recv(MAX_BUFFER)
+	msg_request = user_msg.decode().split()
 	request_task = msg_request[TASK]
+	print(request_task)
 
 	if (request_task[:3] == "AUT"):
 		server_answer = authenticate_usr(request_task)
@@ -126,8 +127,8 @@ while 1:
 
 	connection, client_address = server_sock.accept()
 	print("Connection succefully established\n")
-	#start_new_thread(thread, (connection,))
-	thread(connection)
+	start_new_thread(thread, (connection,))
+	
 
 
 
