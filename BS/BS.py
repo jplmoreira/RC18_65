@@ -38,9 +38,9 @@ def authenticate_usr(key):
 	for i in range(len(USERS)):
 		if (key[4:]==USERS[i]):
 			print(key[4:])
-				msg = "AUR OK"
-				server_msg = msg.encode()
-				return server_msg
+			msg = "AUR OK"
+			server_msg = msg.encode()
+			return server_msg
 		msg = "AUR NOK\n"
 		server_msg = msg.encode()
 		return server_msg
