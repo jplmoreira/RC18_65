@@ -34,8 +34,10 @@ def get_argument_type(arg):
 
 def authenticate_usr(key):
 	msg = ""
+	i = 0
 	for i in range(len(USERS)):
 		if (key[4:]==USERS[i]):
+			print(key[4:])
 				msg = "AUR OK"
 				server_msg = msg.encode()
 				return server_msg
