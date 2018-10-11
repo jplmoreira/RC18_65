@@ -52,7 +52,7 @@ def thread(connection):
 
 	if (request_task[:3] == "AUT"):
 		server_answer = authenticate_usr(request_task)
-		connection.send(server_msg)
+		connection.send(server_answer)
 
 
 	if server_answer == "OK":
@@ -122,10 +122,12 @@ server_sock.listen(10)
 
 print("Waiting for connection...\n")
 
+while 1:
 
-connection, client_address = server_sock.accept()
-print("Connection succefully established\n")
-start_new_thread(thread, (connection,))
+	connection, client_address = server_sock.accept()
+	print("Connection succefully established\n")
+	#start_new_thread(thread, (connection,))
+	thread(connection)
 
 
 
