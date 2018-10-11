@@ -12,6 +12,7 @@
 
 int tcp_connect(char *host_name, int host_port);
 void tcp_disconnect(int fd);
+int tcp_server(int host_port);
 int read_n(void *buf, int nbytes, int r_fd);
 void read_msg(char *msg, char *end, int r_fd);
 int write_n(void *buf, int nbytes, int r_fd);

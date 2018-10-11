@@ -7,7 +7,11 @@ int tcp_connect(char *host_name, int host_port) {
   
   printf("Connecting to %s:%d\n", host_name, host_port);
 
-  fd = socket(AF_INET,SOCK_STREAM,0);
+  if ((fd = socket(AF_INET,SOCK_STREAM,0)) == -1) {
+    printf("Error creating the socket: %s", strerror(errno));
+    return -1;
+  }
+
   hostptr = gethostbyname(host_name);
 
   memset((void*) &serveraddr, (int) '\0', sizeof(serveraddr));
@@ -21,6 +25,37 @@ int tcp_connect(char *host_name, int host_port) {
   }
 
   printf("Connected to server\n");
+  return fd;
+}
+
+int tcp_server(int host_port) {
+  int fd;
+  struct sockaddr_in serveraddr;
+
+  printf("Creating server at port: %d\n", host_port);
+  
+  if ((fd = socket(AF_INET,SOCK_STREAM,0)) == -1) {
+    printf("Error creating the socket: %s\n", strerror(errno));
+    return -1;
+  }
+
+  memset((void*) &serveraddr, (int) '\0', sizeof(serveraddr));
+  serveraddr.sin_family = AF_INET;
+  serveraddr.sin_addr.s_addr = htonl(INADDR_ANY);
+  serveraddr.sin_port = htons((u_short) host_port);
+
+  if (bind(fd, (struct sockaddr*) &serveraddr, sizeof(serveraddr))) {
+    printf("Error binding the socket: %s\n", strerror(errno));
+    return -1;
+  }
+
+  if (listen(fd, 5)) {
+    printf("Error listening on the socket: %s\n", strerror(errno));
+    return -1;
+  }
+
+  printf("Server is now listening for connections\n");
+
   return fd;
 }
 
