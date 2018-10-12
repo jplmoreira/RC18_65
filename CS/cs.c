@@ -26,8 +26,10 @@ void handle_signal();
 void getusrs(char usrs[][15]);
 void *usr_thread(void *args);
 void read_usr(int usr_fd);
+void read_action(int usr_fd, char *usr);
 int verify_usr(char *usr);
 void write_usr(char *usr);
+void deluser(char *usr, int usr_fd);
 
 int main(int argc, char *argv[]){
   pthread_t usr_t;
@@ -67,6 +69,8 @@ int main(int argc, char *argv[]){
     printf("Error joining the thread: %s\n", strerror(errno));
     return -1;
   }
+
+  close(cs_fd);
 
   return 0;
 }
@@ -137,6 +141,7 @@ void *usr_thread() {
     usr_pid = fork();
     if (usr_pid == 0) {
       read_usr(usr_fd);
+      close(usr_fd);
       exit(1);
     } else if (usr_pid < 0) {
       printf("Error forking: %s\n", strerror(errno));
@@ -177,15 +182,41 @@ void read_usr(int usr_fd) {
       printf("Connection closed by peer\n");
       return;
     }
+    read_action(usr_fd, usr);
   } else {
     printf("Error: Non standard response %s\n", msg);
+    memset(buffer, '\0', sizeof(buffer));
+    strcpy(buffer, "ERR\n");
+    if (!write_n(buffer, strlen(buffer), usr_fd)) {
+      printf("Connection closed by peer\n");
+    }
+  }
+}
+
+void read_action(int usr_fd, char *usr) {
+  char msg[4], buffer[MAX_BUFFER];
+
+  memset(msg, '\0', sizeof(msg));
+  if(!read_n(msg, 3, usr_fd)) {
+    printf("Connection closed by peer\n");
     return;
+  }
+
+  if (!strcmp(msg, "DLU")) {
+    deluser(usr, usr_fd);
+  } else {
+    printf("Error: Non standard response %s\n", msg);
+    memset(buffer, '\0', sizeof(buffer));
+    strcpy(buffer, "ERR\n");
+    if (!write_n(buffer, strlen(buffer), usr_fd)) {
+      printf("Connection closed by peer\n");
+    }
   }
 }
 
 int verify_usr(char *usr) {
   char *a, *b, bufa[MAX_BUFFER], bufb[MAX_BUFFER];
-  char usrs[MAX_BUFFER][15];
+  char usrs[MAX_BUFFER][15] = {""};
 
   getusrs(usrs);
 
@@ -226,4 +257,50 @@ void write_usr(char *usr) {
     fprintf(fp, "%s", usr);
   
   fclose(fp);
+}
+
+void deluser(char *usr, int usr_fd) {
+  char buffer[MAX_BUFFER], line[MAX_BUFFER];
+  FILE *fp;
+  int first = 1, deleted = 0;
+
+  memset(buffer, '\0', sizeof(buffer));
+
+  if ((fp = fopen("users.txt", "r")) == NULL) {
+    printf("Error opening the users file: %s\n", strerror(errno));
+    exit(-1);
+  }
+
+  while (fgets(line, 15, fp) != NULL) {
+    if (strcmp(usr, line)) {
+      if (first) {
+        strcpy(buffer, line);
+        first = 0;
+      }
+      else {
+        strcat(buffer, "\n");
+        strcat(buffer, line);
+      }
+    } else
+      deleted = 1;
+    fgets(line, 2, fp);
+  }
+  fclose(fp);
+
+  if ((fp = fopen("users.txt", "w")) == NULL) {
+    printf("Error deleting user: %s\n", strerror(errno));
+    exit(-1);
+  }
+
+  fprintf(fp, "%s", buffer);  
+  fclose(fp);
+
+  memset(buffer, '\0', sizeof(buffer));
+  if (deleted)
+    strcpy(buffer, "DLR OK\n");
+  else
+    strcpy(buffer, "DLR NOK\n");
+  if (!write_n(buffer, strlen(buffer), usr_fd)) {
+    printf("Connection closed by peer\n");
+  }
 }
