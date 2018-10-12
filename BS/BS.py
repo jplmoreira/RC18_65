@@ -12,7 +12,7 @@ STANDART_PORTBS = 59000
 
 server_answer = ""
 
-USERS = ["99999 zzzzzzzz"]
+USERS = []
 
 
 CSport = 0
@@ -192,7 +192,10 @@ signal.signal(signal.SIGINT, unregisterBS(connection))
 
 
 
+
+
 #estabelecer a ligacao com USER
+
 server_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 host_name = socket.gethostname()
 server_sock.bind((host_name, BSport))

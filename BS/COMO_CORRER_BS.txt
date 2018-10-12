@@ -1,0 +1,5 @@
+Como correr o BS
+	em caso de python3:
+		python3 BS.py -b BSport -n CSname -p CSport
+	em caso de python2:
+		python2 BS.py -b BSport -n CSname -p CSport
