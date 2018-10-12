@@ -2,16 +2,17 @@
 from _thread import start_new_thread
 import socket
 import sys
+import signal
 
 
 
 MAX_BUFFER = 512
 STANDART_PORTCS = 58065
 STANDART_PORTBS = 59000
-TASK = 0
+
 server_answer = ""
 
-USERS = [" 99999 zzzzzzzz"]
+USERS = ["99999 zzzzzzzz"]
 
 
 CSport = 0
@@ -35,33 +36,50 @@ def get_argument_type(arg):
 def authenticate_usr(key):
 	msg = ""
 	for i in range(len(USERS)):
-		print("KEY: ", key[4:-1], " USER : ", USERS[i])
 		if (key[4:]==USERS[i]):
-			print(key[4:])
-			msg = "AUR OK"
+			print("OK")
+			msg = "AUR OK\n"
 			server_msg = msg.encode()
 			return server_msg
+		print("NOK")
 		msg = "AUR NOK\n"
 		server_msg = msg.encode()
 		return server_msg
 				
 	
-#def upload_files_to_dir(files):
+def upload_files_from_dir(files):
+	return "UPR NOK"
 
+def restore_files_from_dir(dir):
+	return "RBR EOF"
 
+def read_msg(connection):
+	msg = ""
+	while 1:
+		byte = connection.recv(1)
+		byte = byte.decode()
+		if byte != "\n":
+			msg += byte
+		elif byte == "\n":
+			break
+	return msg
 
+def create_msg(key, host_ID, port):
+	msg = ""
+	msg = key + " " + str(host_ID) + " " + str(BSport) + "\n"
+	message = msg.encode()
+	return message
 
 def thread(connection):
 
 	server_answer = ""
+	msg_request = read_msg(connection)
+	
 
-	user_msg = connection.recv(19)
-	request_task = user_msg.decode()
-	#request_task = msg_request[TASK]
-	print(request_task)
+	print(msg_request)
 
-	if (request_task[:3] == "AUT"):
-		server_answer = authenticate_usr(request_task)
+	if (msg_request[:3] == "AUT"):
+		server_answer = authenticate_usr(msg_request)
 		connection.send(server_answer)
 
 
@@ -69,25 +87,43 @@ def thread(connection):
 
 		while 1:
 
-			user_msg = connection.recv(MAX_BUFFER)
-			msg_request = user_msg.decode().split()
+			msg_request = read_msg(connection)
 
 
 			if len(msg_request) != 0:
 
-				request_task = msg_request[TASK]
-
-				if (request_task[:3] == "UPL"):
-					server_answer = upload_files_to_dir(request_task)
+				if (msg_request[:3] == "UPL"):
+					server_answer = upload_files_from_dir(msg_request)
+					connection.send(server_answer)
+					connection.close()
+					server_sock.close()
+				if (msg_request[:3] == "RSB"):
+					server_answer = restore_files_from_dir(msg_request)
+					connection.send(server_answer)
+					connection.close()
+					server_sock.close()
 
 				else:
 					print("ERR")
 					break	
+
 	connection.close()
 	server_sock.close()
 	return 0
 
-			
+
+def thread_cs(connection):
+
+	server_answer = ""
+	msg_request = read_msg(connection)
+
+	if (msg_request != "RGR NOK" or msg_request != "RGR OK"):
+		msg = "RGR ERR\n"
+		server_answer = msg.encode()
+		connection.send(server_answer)
+	connection.close()
+	server_sock.close()
+	
 
 
 			
@@ -124,13 +160,45 @@ if CSname ==0:
 	CSname = socket.gethostname()
 
 
-#estabelecer a ligacao
+def unregisterBS(connection):
+	msg = ""
+	msg = "UNR " + str(host_ID) +  " " + str(BSport) + "\n"
+	message = msg.encode()
+	server_sock.sendto(message, (CSname, CSport))
+	CS_answer = read_msg(connection)
+	if (CS_answer != "UAR OK" or CS_answer != "UAR NOK"):
+		msg = "UAR ERR\n"
+		server_answer = msg.encode()
+		connection.send(server_answer)
+	connection.close()
+	server_sock.close()
+		
+
+
+#estabelecer a ligacao com o CS
+
+server_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+host_ID = socket.gethostbyname(socket.gethostname())
+message = create_msg("REG", host_ID, BSport)
+server_sock.sendto(message, (CSname, CSport))
+print("Waiting for connection with CS...\n")
+
+connection, cs_address = server_sock.recvfrom(MAX_BUFFER)
+print("Connection succefully established\n")
+start_new_thread(thread_cs, (connection,))
+
+signal.signal(signal.SIGINT, unregisterBS(connection))
+
+
+
+
+#estabelecer a ligacao com USER
 server_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 host_name = socket.gethostname()
 server_sock.bind((host_name, BSport))
 server_sock.listen(10)
 
-print("Waiting for connection...\n")
+print("Waiting for connection with USER...\n")
 
 while 1:
 
