@@ -8,10 +8,10 @@ import sys
 MAX_BUFFER = 512
 STANDART_PORTCS = 58065
 STANDART_PORTBS = 59000
-TASK = 0
+
 server_answer = ""
 
-USERS = [" 99999 zzzzzzzz"]
+USERS = ["99999 zzzzzzzz"]
 
 
 CSport = 0
@@ -35,33 +35,44 @@ def get_argument_type(arg):
 def authenticate_usr(key):
 	msg = ""
 	for i in range(len(USERS)):
-		print("KEY: ", key[4:-1], " USER : ", USERS[i])
 		if (key[4:]==USERS[i]):
-			print(key[4:])
+			print("OK")
 			msg = "AUR OK"
 			server_msg = msg.encode()
 			return server_msg
+		print("NOK")
 		msg = "AUR NOK\n"
 		server_msg = msg.encode()
 		return server_msg
 				
 	
-#def upload_files_to_dir(files):
+def upload_files_from_dir(files):
+	return "UPR NOK"
 
+def restore_files_from_dir(dir):
+	return "RBR EOF"
 
-
+def read_msg(connection):
+	msg = ""
+	while 1:
+		byte = connection.recv(1)
+		byte = byte.decode()
+		if byte != "\n":
+			msg += byte
+		elif byte == "\n":
+			break
+	return msg
 
 def thread(connection):
 
 	server_answer = ""
+	msg_request = read_msg(connection)
+	
 
-	user_msg = connection.recv(19)
-	request_task = user_msg.decode()
-	#request_task = msg_request[TASK]
-	print(request_task)
+	print(msg_request)
 
-	if (request_task[:3] == "AUT"):
-		server_answer = authenticate_usr(request_task)
+	if (msg_request[:3] == "AUT"):
+		server_answer = authenticate_usr(msg_request)
 		connection.send(server_answer)
 
 
@@ -69,20 +80,26 @@ def thread(connection):
 
 		while 1:
 
-			user_msg = connection.recv(MAX_BUFFER)
-			msg_request = user_msg.decode().split()
+			msg_request = read_msg(connection)
 
 
 			if len(msg_request) != 0:
 
-				request_task = msg_request[TASK]
-
-				if (request_task[:3] == "UPL"):
-					server_answer = upload_files_to_dir(request_task)
+				if (msg_request[:3] == "UPL"):
+					server_answer = upload_files_from_dir(msg_request)
+					connection.send(server_answer)
+					connection.close()
+					server_sock.close()
+				if (msg_request[:3] == "RSB"):
+					server_answer = restore_files_from_dir(msg_request)
+					connection.send(server_answer)
+					connection.close()
+					server_sock.close()
 
 				else:
 					print("ERR")
 					break	
+
 	connection.close()
 	server_sock.close()
 	return 0
