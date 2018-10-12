@@ -2,6 +2,7 @@
 from _thread import start_new_thread
 import socket
 import sys
+import signal
 
 
 
@@ -37,7 +38,7 @@ def authenticate_usr(key):
 	for i in range(len(USERS)):
 		if (key[4:]==USERS[i]):
 			print("OK")
-			msg = "AUR OK"
+			msg = "AUR OK\n"
 			server_msg = msg.encode()
 			return server_msg
 		print("NOK")
@@ -62,6 +63,12 @@ def read_msg(connection):
 		elif byte == "\n":
 			break
 	return msg
+
+def create_msg(key, host_ID, port):
+	msg = ""
+	msg = key + " " + str(host_ID) + " " + str(BSport) + "\n"
+	message = msg.encode()
+	return message
 
 def thread(connection):
 
@@ -104,7 +111,19 @@ def thread(connection):
 	server_sock.close()
 	return 0
 
-			
+
+def thread_cs(connection):
+
+	server_answer = ""
+	msg_request = read_msg(connection)
+
+	if (msg_request != "RGR NOK" or msg_request != "RGR OK"):
+		msg = "RGR ERR\n"
+		server_answer = msg.encode()
+		connection.send(server_answer)
+	connection.close()
+	server_sock.close()
+	
 
 
 			
@@ -141,13 +160,45 @@ if CSname ==0:
 	CSname = socket.gethostname()
 
 
-#estabelecer a ligacao
+def unregisterBS(connection):
+	msg = ""
+	msg = "UNR " + str(host_ID) +  " " + str(BSport) + "\n"
+	message = msg.encode()
+	server_sock.sendto(message, (CSname, CSport))
+	CS_answer = read_msg(connection)
+	if (CS_answer != "UAR OK" or CS_answer != "UAR NOK"):
+		msg = "UAR ERR\n"
+		server_answer = msg.encode()
+		connection.send(server_answer)
+	connection.close()
+	server_sock.close()
+		
+
+
+#estabelecer a ligacao com o CS
+
+server_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+host_ID = socket.gethostbyname(socket.gethostname())
+message = create_msg("REG", host_ID, BSport)
+server_sock.sendto(message, (CSname, CSport))
+print("Waiting for connection with CS...\n")
+
+connection, cs_address = server_sock.recvfrom(MAX_BUFFER)
+print("Connection succefully established\n")
+start_new_thread(thread_cs, (connection,))
+
+signal.signal(signal.SIGINT, unregisterBS(connection))
+
+
+
+
+#estabelecer a ligacao com USER
 server_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 host_name = socket.gethostname()
 server_sock.bind((host_name, BSport))
 server_sock.listen(10)
 
-print("Waiting for connection...\n")
+print("Waiting for connection with USER...\n")
 
 while 1:
 
